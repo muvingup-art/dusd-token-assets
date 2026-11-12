@@ -33,14 +33,14 @@ button{width:100%;margin-top:12px;padding:14px 16px;border:0;border-radius:12px;
   </section>
   <button id="metamaskBtn">Добавить в MetaMask</button>
   <button id="trustBtn" class="secondary">Добавить в Trust Wallet</button>
+  <button id="refreshLogoBtn" class="secondary">Повторно запросить логотип в Trust Wallet</button>
   <button id="switchBtn" class="secondary">Переключить сеть на Sepolia</button>
+  <div class="foot">Если dUSD уже добавлен без значка, сначала скройте старую запись dUSD в Trust Wallet, затем нажмите кнопку повторного запроса. Кошелёк может не обновить уже сохранённую иконку автоматически.</div>
   <div id="status" role="status" aria-live="polite"></div>
   <div class="foot">Страница не запрашивает seed-фразу, приватный ключ, подпись сообщения или перевод средств.<br><a href="https://eips.ethereum.org/EIPS/eip-747" target="_blank" rel="noopener noreferrer">Стандарт wallet_watchAsset (EIP-747)</a></div>
 </main>
 <script>
 "use strict";
-// ВСТАВЬТЕ ПОЛНЫЙ адрес ERC-20 контракта dUSD в Sepolia вместо строки ниже.
-// Адрес на присланных скриншотах обрезан — его нельзя безопасно угадать.
 const TOKEN_ADDRESS = "0x6EF54Ac61c5c79b9a5C9f3bCC8e9fFf26FB661c6";
 const TOKEN = {symbol:"dUSD", decimals:6, image:"https://raw.githubusercontent.com/muvingup-art/dusd-token-assets/main/logo.png"};
 const SEPOLIA_CHAIN_ID = "0xaa36a7";
@@ -48,17 +48,50 @@ const statusEl = document.getElementById("status");
 const mmBtn = document.getElementById("metamaskBtn");
 const twBtn = document.getElementById("trustBtn");
 const switchBtn = document.getElementById("switchBtn");
+const refreshLogoBtn = document.getElementById("refreshLogoBtn");
+
+// EIP-6963 discovery: supports multiple injected wallets without relying
+// only on window.ethereum (which may belong to another extension).
+const announcedProviders = [];
+window.addEventListener("eip6963:announceProvider", (event) => {
+  const detail = event.detail;
+  if (detail && detail.provider && detail.info) {
+    if (!announcedProviders.some(x => x.info.uuid === detail.info.uuid)) {
+      announcedProviders.push(detail);
+    }
+  }
+});
+window.dispatchEvent(new Event("eip6963:requestProvider"));
+
 function status(message,kind="info"){statusEl.className=kind;statusEl.textContent=message;}
 function validAddress(a){return /^0x[a-fA-F0-9]{40}$/.test(a);}
-function providers(){
-  const eth=window.ethereum;if(!eth)return [];
-  const list=Array.isArray(eth.providers)?eth.providers:[eth];
-  return [...new Set(list.filter(p=>p&&typeof p.request==="function"))];
+function allInjectedProviders(){
+  const found = [];
+  const add = p => { if(p && typeof p.request==="function" && !found.includes(p)) found.push(p); };
+  add(window.trustwallet);
+  add(window.ethereum);
+  if (Array.isArray(window.ethereum?.providers)) window.ethereum.providers.forEach(add);
+  announcedProviders.forEach(x => add(x.provider));
+  return found;
 }
 function findProvider(wallet){
-  const list=providers();
-  if(wallet==="metamask")return list.find(p=>p.isMetaMask&&!p.isTrust)||(list.length===1&&list[0].isMetaMask?list[0]:null);
-  if(wallet==="trust")return list.find(p=>p.isTrust)||(list.length===1&&list[0].isTrust?list[0]:null);
+  const announced = announcedProviders.filter(x => x.provider);
+  if(wallet==="trust"){
+    const eip6963 = announced.find(x =>
+      String(x.info?.rdns || "").toLowerCase() === "com.trustwallet.app" ||
+      String(x.info?.name || "").toLowerCase().includes("trust wallet")
+    );
+    if(eip6963) return eip6963.provider;
+    return allInjectedProviders().find(p => p.isTrust === true) || null;
+  }
+  if(wallet==="metamask"){
+    const eip6963 = announced.find(x =>
+      String(x.info?.rdns || "").toLowerCase() === "io.metamask" ||
+      String(x.info?.name || "").toLowerCase().includes("metamask")
+    );
+    if(eip6963) return eip6963.provider;
+    return allInjectedProviders().find(p => p.isMetaMask === true && p.isTrust !== true) || null;
+  }
   return null;
 }
 async function switchToSepolia(provider){
@@ -80,24 +113,35 @@ async function switchToSepolia(provider){
   if(String(after).toLowerCase()!==SEPOLIA_CHAIN_ID)throw new Error("Кошелёк не переключился на Sepolia. Выберите Sepolia вручную.");
   return true;
 }
-async function addToken(wallet){
-  if(!validAddress(TOKEN_ADDRESS)){status("Сначала укажите полный адрес контракта dUSD в TOKEN_ADDRESS в этом файле index.html.","err");return;}
+async function addToken(wallet, refreshLogo=false){
+  if(!validAddress(TOKEN_ADDRESS)){status("Некорректный адрес контракта в настройках страницы.","err");return;}
+  // Re-request announcements in case the wallet injected after page load.
+  window.dispatchEvent(new Event("eip6963:requestProvider"));
   const provider=findProvider(wallet);
-  if(!provider){status((wallet==="metamask"?"MetaMask":"Trust Wallet")+" не обнаружен. Откройте страницу в браузере с установленным расширением или во встроенном DApp-браузере Trust Wallet.","err");return;}
-  const btn=wallet==="metamask"?mmBtn:twBtn;btn.disabled=true;status("Проверяем сеть кошелька…");
+  if(!provider){
+    status(wallet==="trust"
+      ? "Trust Wallet не найден среди подключённых провайдеров. Обновите страницу после разблокировки расширения Trust Wallet. Если расширение открыто в отдельной боковой панели, убедитесь, что оно включено для этого сайта."
+      : "MetaMask не найден. Разблокируйте расширение и обновите страницу.","err");
+    return;
+  }
+  const btn=wallet==="metamask"?mmBtn:twBtn;btn.disabled=true;status("Проверяем сеть выбранного кошелька…");
   try{
-    await switchToSepolia(provider);status("Отправляем запрос на добавление dUSD. Подтвердите его в кошельке.");
-    const added=await provider.request({method:"wallet_watchAsset",params:{type:"ERC20",options:{address:TOKEN_ADDRESS,symbol:TOKEN.symbol,decimals:TOKEN.decimals,image:TOKEN.image}}});
-    if(added===true)status("Кошелёк сообщил, что токен добавлен. Отображение логотипа зависит от поддержки кошелька.","ok");
+    await switchToSepolia(provider);
+    status("Запрашиваем добавление dUSD. Подтвердите действие в окне выбранного кошелька.");
+    const imageUrl = refreshLogo ? TOKEN.image + "?v=20261112-2" : TOKEN.image;
+    const added=await provider.request({method:"wallet_watchAsset",params:{type:"ERC20",options:{address:TOKEN_ADDRESS,symbol:TOKEN.symbol,decimals:TOKEN.decimals,image:imageUrl}}});
+    if(added===true)status(refreshLogo ? "Trust Wallet принял повторный запрос dUSD с обновлённой ссылкой на логотип. Проверьте карточку токена; обновление иконки не гарантируется кошельком." : "Кошелёк сообщил, что токен добавлен. Отображение логотипа зависит от поддержки кошелька.","ok");
     else status("Запрос отменён или кошелёк не подтвердил добавление.","err");
   }catch(error){status("Не удалось добавить токен: "+(error&&error.message?error.message:String(error)),"err");}
   finally{btn.disabled=false;}
 }
 mmBtn.addEventListener("click",()=>addToken("metamask"));
 twBtn.addEventListener("click",()=>addToken("trust"));
+refreshLogoBtn.addEventListener("click",()=>addToken("trust",true));
 switchBtn.addEventListener("click",async()=>{
-  const list=providers();const provider=list.find(p=>p.isMetaMask&&!p.isTrust)||list.find(p=>p.isTrust)||(list.length===1?list[0]:null);
-  if(!provider){status("Не удалось определить кошелёк. Откройте страницу через нужное расширение.","err");return;}
+  window.dispatchEvent(new Event("eip6963:requestProvider"));
+  const provider=findProvider("trust") || findProvider("metamask") || allInjectedProviders()[0];
+  if(!provider){status("Кошелёк не обнаружен. Разблокируйте расширение и обновите страницу.","err");return;}
   try{await switchToSepolia(provider);status("Кошелёк переключён на Sepolia.","ok");}
   catch(error){status("Не удалось переключить сеть: "+(error.message||error),"err");}
 });
