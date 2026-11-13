@@ -357,11 +357,7 @@ async function addToken(wallet, refreshLogo = false) {
     status("Проверяем контракт и decimals()...");
     await verifyContract(provider);
 
-    const imageUrl = new URL(TOKEN.image);
-    imageUrl.searchParams.set(
-      "v",
-      refreshLogo ? TOKEN.imageVersion + "-" + Date.now() : TOKEN.imageVersion
-    );
+const imageUrl = new URL(TOKEN.image);
 
     status("Проверяем доступность логотипа...");
     await verifyImage(imageUrl.href);
@@ -374,7 +370,7 @@ async function addToken(wallet, refreshLogo = false) {
         type: "ERC20",
         options: {
           address: TOKEN_ADDRESS,
-          chainId: SEPOLIA_CHAIN_ID_NUMBER,
+         
           symbol: TOKEN.symbol,
           decimals: TOKEN.decimals,
           image: imageUrl.href
