@@ -369,12 +369,12 @@ const imageUrl = new URL(TOKEN.image);
       params: {
         type: "ERC20",
         options: {
-          address: TOKEN_ADDRESS,
-         
-          symbol: TOKEN.symbol,
-          decimals: TOKEN.decimals,
-          image: imageUrl.href
-        }
+  address: TOKEN_ADDRESS,
+  chainId: SEPOLIA_CHAIN_ID_NUMBER,
+  symbol: TOKEN.symbol,
+  decimals: TOKEN.decimals,
+  image: imageUrl.href
+}
       }
     });
 
