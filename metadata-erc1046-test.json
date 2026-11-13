@@ -6,5 +6,8 @@
   "symbol": "dUSDM",
   "decimals": 6,
   "description": "TEST TOKEN ONLY on Ethereum Sepolia (chain ID 11155111). Not USDT, not backed by dollars, not redeemable, and has no real-world value.",
-  "image": "https://muvingup-art.github.io/dusd-token-assets/logo.png"
+  "image": "https://muvingup-art.github.io/dusd-token-assets/logo.png",
+  "icons": [
+    "https://muvingup-art.github.io/dusd-token-assets/logo.png"
+  ]
 }
